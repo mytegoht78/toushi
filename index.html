@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2312202c'/%3E%3Cline x1='38' y1='38' x2='56' y2='56' stroke='%238a5a36' stroke-width='9' stroke-linecap='round'/%3E%3Ccircle cx='26' cy='26' r='18' fill='%23123d78' stroke='%23d9dee4' stroke-width='5'/%3E%3Cpath d='M16 30h20M20 22h12M26 14v24' stroke='%23e9f3ff' stroke-width='2.5'/%3E%3C/svg%3E">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>透視レンズ</title>
+<style>
+:root{
+  --bg:#0d1014; --panel:rgba(20,24,30,.92); --line:#2c333d; --text:#e8ecf1; --sub:#9aa5b1;
+  --accent:#5fd4ff; --accent2:#7dff9a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#view{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block;cursor:none}
+button{font:inherit;color:inherit;background:#232a33;border:1px solid var(--line);border-radius:8px;
+  padding:6px 10px;cursor:pointer}
+button:hover{border-color:#46515e}
+button.on{background:#14394a;border-color:var(--accent);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+
+/* ===== セットアップ ===== */
+#setup{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 50% 30%,#18202a,#0b0d10);z-index:20;padding:16px;overflow:auto}
+#setup.hide{display:none}
+.card{width:min(760px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
+h1{margin:0 0 4px;font-size:22px;letter-spacing:.05em}
+.lead{margin:0 0 16px;color:var(--sub);font-size:14px;line-height:1.6}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media (max-width:560px){.slots{grid-template-columns:1fr}}
+.slot{position:relative;border:2px dashed #3a4451;border-radius:12px;aspect-ratio:4/3;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;cursor:pointer;
+  background:#12161b center/cover no-repeat;overflow:hidden;text-align:center;padding:8px}
+@media (max-width:560px){.slot{aspect-ratio:auto;height:120px}}
+.slot.drag{border-color:var(--accent)}
+.slot.filled{border-style:solid;border-color:#4a5563}
+.slot .lab{font-weight:700;font-size:15px;text-shadow:0 1px 3px #000}
+.slot .hint{font-size:12px;color:var(--sub);text-shadow:0 1px 3px #000}
+.slot.filled .hint{color:#dfe6ee}
+.slot .badge{position:absolute;top:6px;left:8px;font-size:12px;background:#000a;padding:2px 8px;border-radius:99px}
+.slot .del{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:12px;background:#000b}
+.slot.filled .lab,.slot.filled .hint{background:#0009;padding:2px 8px;border-radius:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+.row .grow{flex:1}
+.go{background:#1a5a3a;border-color:#2f9a63;font-weight:700;padding:10px 22px;font-size:16px}
+.note{font-size:12px;color:var(--sub);line-height:1.6;margin-top:12px}
+
+/* ===== ツールバー ===== */
+#bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:10;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 10px;
+  display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:center;
+  width:max-content;max-width:calc(100% - 24px);backdrop-filter:blur(6px);font-size:13px}
+#bar.hide{display:none}
+#bar.mini .opt{display:none}
+.grp{display:flex;gap:4px;align-items:center}
+.grp>span{color:var(--sub);margin-right:2px;white-space:nowrap}
+.grp button{padding:5px 9px}
+input[type=range]{width:96px;accent-color:var(--accent)}
+#depthLabel{min-width:3.5em;color:var(--accent);font-variant-numeric:tabular-nums}
+#hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:9;font-size:13px;
+  background:#000a;padding:4px 12px;border-radius:99px;pointer-events:none;opacity:0;transition:opacity .3s}
+#hud.show{opacity:1}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud"></div>
+
+<section id="setup">
+  <div class="card">
+    <h1>透視レンズ</h1>
+    <p class="lead">重ねたい画像を 2〜3 枚えらんでください。①がいつも見えている表面、②③がレンズの奥に見える層です。<br>
+    大きさは①に合わせて伸縮するので、同じ構図・同じサイズの差分画像がきれいに重なります。</p>
+    <div class="slots" id="slots"></div>
+    <div class="row">
+      <button id="sampleBtn">サンプル（家）で試す</button>
+      <span class="grow"></span>
+      <button class="go" id="goBtn" disabled>透視する</button>
+    </div>
+    <div class="note">画像はこの端末のブラウザ内だけに保存されます（外部に送信しません）。<br>
+    PC：マウスでレンズ移動／ホイールで深さ／Shift+ホイールでサイズ／1・2・3キーで深さ切替／Hでバーを隠す<br>
+    スマホ：ドラッグで移動（レンズは指の少し上）／2本指でサイズ変更</div>
+  </div>
+</section>
+
+<div id="bar" class="hide">
+  <div class="grp"><button id="imgBtn" title="画像をえらび直す">画像</button><button id="miniBtn" title="バーを小さく">▾</button></div>
+  <div class="grp opt"><span>レンズ</span>
+    <button data-style="loupe" class="on">ルーペ</button>
+    <button data-style="scope">X線</button>
+    <button data-style="light">ライト</button>
+  </div>
+  <div class="grp opt"><span>形</span>
+    <button data-shape="circle" class="on">円</button>
+    <button data-shape="band">帯</button>
+  </div>
+  <div class="grp opt"><span>大きさ</span><input type="range" id="size" min="40" max="400" value="130"></div>
+  <div class="grp" id="depthGrp"><span>深さ</span><input type="range" id="depth" min="1" max="2" step="0.01" value="1"><span id="depthLabel">②</span></div>
+  <div class="grp opt" id="ringGrp"><button id="ringBtn" title="外側に②、中心に③">二重レンズ</button></div>
+  <div class="grp opt"><span>拡大</span><input type="range" id="zoom" min="1" max="3" step="0.05" value="1"></div>
+  <div class="grp opt"><span>ふち</span><input type="range" id="soft" min="0" max="0.9" step="0.01" value="0.15"></div>
+  <div class="grp opt"><button id="offsetBtn" title="タッチ時、レンズを指の上に出す">指ずらし</button></div>
+</div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const MAXSIDE = 2400;
+const NAMES = ['① 表面', '② 中の層', '③ いちばん奥'];
+const HINTS = ['いつも見える画像', 'レンズの中に見える', '（なくてもOK）'];
+
+/* ---------- 状態 ---------- */
+const S = {
+  files: [null, null, null],   // Blob or canvas(sample)
+  layers: [],                  // 正規化済みcanvas
+  w: 0, h: 0,
+  style: 'loupe', shape: 'circle',
+  r: 130, depth: 1, zoom: 1, soft: 0.15, ring: false,
+  offset: matchMedia('(pointer:coarse)').matches,
+  lx: -9999, ly: -9999, visible: false, t: 0,
+};
+try { Object.assign(S, JSON.parse(localStorage.getItem('toushi-settings') || '{}')); } catch (e) {}
+S.lx = -9999; S.visible = false;
+function saveSettings() {
+  try {
+    const { style, shape, r, depth, zoom, soft, ring, offset } = S;
+    localStorage.setItem('toushi-settings', JSON.stringify({ style, shape, r, depth, zoom, soft, ring, offset }));
+  } catch (e) {}
+}
+
+/* ---------- IndexedDB（画像保存） ---------- */
+const DB = {
+  open() {
+    return new Promise((res, rej) => {
+      const q = indexedDB.open('toushi', 1);
+      q.onupgradeneeded = () => q.result.createObjectStore('img');
+      q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+    });
+  },
+  async put(k, v) { try { const d = await this.open(); d.transaction('img', 'readwrite').objectStore('img').put(v, k); } catch (e) {} },
+  async del(k) { try { const d = await this.open(); d.transaction('img', 'readwrite').objectStore('img').delete(k); } catch (e) {} },
+  async get(k) {
+    try {
+      const d = await this.open();
+      return await new Promise(res => { const q = d.transaction('img').objectStore('img').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+    } catch (e) { return null; }
+  },
+};
+
+/* ---------- セットアップ画面 ---------- */
+const slotsEl = $('#slots');
+const thumbURL = [null, null, null];
+function buildSlots() {
+  slotsEl.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const el = document.createElement('div');
+    el.className = 'slot';
+    el.innerHTML = `<span class="lab">${NAMES[i]}</span><span class="hint">${HINTS[i]}<br>タップ / ドロップで選択</span>`;
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.hidden = true;
+    inp.onchange = () => { if (inp.files[0]) setFile(i, inp.files[0]); inp.value = ''; };
+    el.appendChild(inp);
+    el.onclick = e => { if (!e.target.classList.contains('del')) inp.click(); };
+    el.ondragover = e => { e.preventDefault(); el.classList.add('drag'); };
+    el.ondragleave = () => el.classList.remove('drag');
+    el.ondrop = e => {
+      e.preventDefault(); el.classList.remove('drag');
+      const f = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+      f.forEach((file, k) => { if (i + k < 3) setFile(i + k, file); });
+    };
+    slotsEl.appendChild(el);
+  }
+  refreshSlots();
+}
+function refreshSlots() {
+  [...slotsEl.children].forEach((el, i) => {
+    const f = S.files[i];
+    if (thumbURL[i]) { URL.revokeObjectURL(thumbURL[i]); thumbURL[i] = null; }
+    el.querySelector('.del')?.remove();
+    if (f) {
+      let url;
+      if (f instanceof Blob) url = thumbURL[i] = URL.createObjectURL(f);
+      else url = f.toDataURL('image/jpeg', .6);
+      el.style.backgroundImage = `url("${url}")`;
+      el.classList.add('filled');
+      el.querySelector('.hint').innerHTML = 'タップで変更';
+      const d = document.createElement('button');
+      d.className = 'del'; d.textContent = '✕';
+      d.onclick = e => { e.stopPropagation(); setFile(i, null); };
+      el.appendChild(d);
+    } else {
+      el.style.backgroundImage = '';
+      el.classList.remove('filled');
+      el.querySelector('.hint').innerHTML = `${HINTS[i]}<br>タップ / ドロップで選択`;
+    }
+  });
+  $('#goBtn').disabled = !(S.files[0] && (S.files[1] || S.files[2]));
+}
+function setFile(i, f) {
+  S.files[i] = f;
+  if (f instanceof Blob) DB.put('f' + i, f); else DB.del('f' + i);
+  refreshSlots();
+}
+
+async function toCanvas(src, w, h) {
+  let img;
+  if (src instanceof Blob) {
+    img = await new Promise((res, rej) => {
+      const u = URL.createObjectURL(src), im = new Image();
+      im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 1000); };
+      im.onerror = rej; im.src = u;
+    });
+  } else img = src;
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!w) { const k = Math.min(1, MAXSIDE / Math.max(iw, ih)); w = Math.round(iw * k); h = Math.round(ih * k); }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return c;
+}
+
+async function start() {
+  const list = S.files.filter(Boolean);
+  if (list.length < 2) return;
+  $('#goBtn').disabled = true; $('#goBtn').textContent = '読み込み中…';
+  try {
+    const base = await toCanvas(list[0]);
+    S.w = base.width; S.h = base.height;
+    S.layers = [base];
+    for (let i = 1; i < list.length; i++) S.layers.push(await toCanvas(list[i], S.w, S.h));
+  } catch (e) {
+    alert('画像を読み込めませんでした'); $('#goBtn').textContent = '透視する'; refreshSlots(); return;
+  }
+  $('#goBtn').textContent = '透視する';
+  $('#setup').classList.add('hide');
+  $('#bar').classList.remove('hide');
+  const n = S.layers.length;
+  $('#depthGrp').style.display = n > 2 ? '' : 'none';
+  $('#ringGrp').style.display = n > 2 ? '' : 'none';
+  if (n < 3) { S.depth = 1; S.ring = false; }
+  S.depth = Math.min(S.depth, n - 1);
+  syncUI(); resize();
+  // 最初は中央にレンズを出しておく
+  S.lx = innerWidth / 2; S.ly = innerHeight * 0.45; S.visible = true;
+  hud(matchMedia('(pointer:coarse)').matches ? 'ドラッグでレンズを動かす' : 'マウスを動かしてのぞいてみよう');
+}
+$('#goBtn').onclick = start;
+$('#imgBtn').onclick = () => { $('#setup').classList.remove('hide'); $('#bar').classList.add('hide'); refreshSlots(); };
+$('#sampleBtn').onclick = () => { const s = makeSample(); s.forEach((c, i) => setFile(i, c)); start(); };
+
+/* ---------- ツールバー ---------- */
+function syncUI() {
+  document.querySelectorAll('[data-style]').forEach(b => b.classList.toggle('on', b.dataset.style === S.style));
+  document.querySelectorAll('[data-shape]').forEach(b => b.classList.toggle('on', b.dataset.shape === S.shape));
+  $('#size').value = S.r; $('#zoom').value = S.zoom; $('#soft').value = S.soft;
+  $('#depth').max = Math.max(1, S.layers.length - 1); $('#depth').value = S.depth;
+  $('#ringBtn').classList.toggle('on', S.ring);
+  $('#offsetBtn').classList.toggle('on', S.offset);
+  $('#depth').disabled = S.ring;
+  $('#depthLabel').textContent = S.ring ? '②＋③' : depthText();
+  saveSettings();
+}
+function depthText() {
+  const d = S.depth, f = Math.floor(d + 1e-6), fr = d - f;
+  const m = ['①', '②', '③'];
+  if (fr < 0.03) return m[f]; if (fr > 0.97) return m[f + 1];
+  return `${m[f]}→${m[f + 1]}`;
+}
+document.querySelectorAll('[data-style]').forEach(b => b.onclick = () => {
+  S.style = b.dataset.style;
+  S.soft = { loupe: 0.12, scope: 0.2, light: 0.6 }[S.style];
+  syncUI();
+});
+document.querySelectorAll('[data-shape]').forEach(b => b.onclick = () => { S.shape = b.dataset.shape; syncUI(); });
+$('#size').oninput = e => { S.r = +e.target.value; syncUI(); };
+$('#zoom').oninput = e => { S.zoom = +e.target.value; syncUI(); };
+$('#soft').oninput = e => { S.soft = +e.target.value; syncUI(); };
+$('#depth').oninput = e => { S.depth = +e.target.value; syncUI(); };
+$('#ringBtn').onclick = () => { S.ring = !S.ring; syncUI(); };
+$('#offsetBtn').onclick = () => { S.offset = !S.offset; syncUI(); hud(S.offset ? 'タッチ時はレンズを指の上に表示' : '指の真下にレンズを表示'); };
+$('#miniBtn').onclick = () => { const m = $('#bar').classList.toggle('mini'); $('#miniBtn').textContent = m ? '▴' : '▾'; };
+// バー上の操作でレンズが消えないように
+$('#bar').addEventListener('pointerdown', e => e.stopPropagation());
+
+let hudT = 0;
+function hud(t) { const h = $('#hud'); h.textContent = t; h.classList.add('show'); clearTimeout(hudT); hudT = setTimeout(() => h.classList.remove('show'), 1800); }
+
+/* ---------- 描画 ---------- */
+const cv = $('#view'), ctx = cv.getContext('2d');
+const buf = document.createElement('canvas'), bctx = buf.getContext('2d');
+const buf2 = document.createElement('canvas'), b2ctx = buf2.getContext('2d');
+let DPR = 1, W = 0, H = 0, fit = { x: 0, y: 0, w: 0, h: 0 };
+function resize() {
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  for (const c of [cv, buf, buf2]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  if (S.w) {
+    const k = Math.min(W / S.w, H / S.h);
+    fit.w = S.w * k; fit.h = S.h * k; fit.x = (W - fit.w) / 2; fit.y = (H - fit.h) / 2;
+  }
+}
+addEventListener('resize', resize);
+
+// レイヤーをバッファに（レンズ中心を基準に拡大して）描く
+function drawLayer(c, idx, alpha, cx, cy) {
+  if (alpha <= 0) return;
+  c.save();
+  c.globalAlpha = alpha;
+  c.translate(cx, cy); c.scale(S.zoom, S.zoom); c.translate(-cx, -cy);
+  c.drawImage(S.layers[idx], fit.x, fit.y, fit.w, fit.h);
+  c.restore();
+}
+// 深さ d（小数OK）の見え方をバッファに描く
+function drawDepth(c, d, cx, cy) {
+  const n = S.layers.length;
+  d = Math.max(0, Math.min(n - 1, d));
+  const f = Math.floor(d + 1e-6), fr = d - f;
+  drawLayer(c, f, 1, cx, cy);
+  if (fr > 0.001 && f + 1 < n) drawLayer(c, f + 1, fr, cx, cy);
+}
+// レンズ形のマスク（ふちのぼかし付き）
+function applyMask(c, cx, cy, r) {
+  c.save();
+  c.globalCompositeOperation = 'destination-in';
+  const inner = r * (1 - S.soft);
+  if (S.shape === 'circle') {
+    const g = c.createRadialGradient(cx, cy, Math.max(0, inner - 0.5), cx, cy, r);
+    g.addColorStop(0, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+  } else {
+    const g = c.createLinearGradient(cx - r, 0, cx + r, 0);
+    const s = Math.max(0.001, S.soft / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(s, '#000');
+    g.addColorStop(1 - s, '#000'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+  }
+  c.fillRect(0, 0, W, H);
+  c.restore();
+}
+
+function render(t) {
+  requestAnimationFrame(render);
+  if (!S.layers.length || $('#setup').classList.contains('hide') === false) return;
+  S.t = t / 1000;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#0d1014'; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(S.layers[0], fit.x, fit.y, fit.w, fit.h);
+  if (!S.visible) return;
+
+  const cx = S.lx, cy = S.ly, r = S.r, n = S.layers.length;
+
+  // ライト：まわりを少し暗く
+  if (S.style === 'light') { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H); }
+
+  // ---- レンズの中身 ----
+  bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  bctx.clearRect(0, 0, W, H);
+  if (S.ring && n > 2) {
+    drawLayer(bctx, 1, 1, cx, cy);
+    // 中心だけさらに奥（③）
+    b2ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    b2ctx.clearRect(0, 0, W, H);
+    drawLayer(b2ctx, 2, 1, cx, cy);
+    const save = S.soft; S.soft = Math.max(0.25, S.soft);
+    applyMask(b2ctx, cx, cy, r * 0.52);
+    S.soft = save;
+    bctx.setTransform(1, 0, 0, 1, 0, 0);
+    bctx.drawImage(buf2, 0, 0);
+    bctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  } else {
+    drawDepth(bctx, S.depth, cx, cy);
+  }
+
+  // X線：色味と走査線
+  if (S.style === 'scope') {
+    bctx.save();
+    bctx.globalCompositeOperation = 'multiply';
+    bctx.fillStyle = '#9dffc8'; bctx.fillRect(0, 0, W, H);
+    bctx.globalCompositeOperation = 'source-over';
+    bctx.fillStyle = 'rgba(0,40,20,.18)';
+    for (let y = (S.t * 40) % 4; y < H; y += 4) bctx.fillRect(0, y, W, 1.5);
+    const sy = cy - r + ((S.t * 0.6) % 1) * r * 2;
+    const g = bctx.createLinearGradient(0, sy - 18, 0, sy + 2);
+    g.addColorStop(0, 'rgba(120,255,170,0)'); g.addColorStop(1, 'rgba(160,255,200,.45)');
+    bctx.fillStyle = g; bctx.fillRect(0, sy - 18, W, 20);
+    bctx.restore();
+  }
+  applyMask(bctx, cx, cy, r);
+
+  // ガラスの反射（ルーペ）
+  if (S.style === 'loupe' && S.shape === 'circle') {
+    bctx.save();
+    bctx.globalCompositeOperation = 'source-atop';
+    const g = bctx.createRadialGradient(cx - r * .4, cy - r * .45, 0, cx - r * .4, cy - r * .45, r * .9);
+    g.addColorStop(0, 'rgba(255,255,255,.28)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    bctx.fillStyle = g; bctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    bctx.restore();
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(buf, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  drawFrame(cx, cy, r);
+}
+
+// レンズの枠（見た目）
+function drawFrame(cx, cy, r) {
+  ctx.save();
+  if (S.shape === 'band') {
+    if (S.style === 'light') { ctx.restore(); return; }
+    const col = S.style === 'scope' ? 'rgba(125,255,154,.9)' : 'rgba(220,225,232,.9)';
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx - r, 0); ctx.lineTo(cx - r, H); ctx.moveTo(cx + r, 0); ctx.lineTo(cx + r, H); ctx.stroke();
+    // つまみ
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.roundRect(cx - 18, cy - 6, 36, 12, 6); ctx.fill();
+    ctx.restore(); return;
+  }
+  if (S.style === 'loupe') {
+    // 柄
+    const a = Math.PI * 0.25, x1 = cx + Math.cos(a) * r * 1.06, y1 = cy + Math.sin(a) * r * 1.06;
+    const len = Math.max(50, r * 0.9);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#3b2a1e'; ctx.lineWidth = Math.max(12, r * 0.16);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 + Math.cos(a) * len, y1 + Math.sin(a) * len); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = Math.max(3, r * 0.04);
+    ctx.beginPath(); ctx.moveTo(x1 + 2, y1 - 2); ctx.lineTo(x1 + Math.cos(a) * len + 2, y1 + Math.sin(a) * len - 2); ctx.stroke();
+    // 金属リング
+    const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    g.addColorStop(0, '#f4f6f8'); g.addColorStop(.45, '#8b939c'); g.addColorStop(.55, '#c9ced4'); g.addColorStop(1, '#5c636b');
+    ctx.strokeStyle = g; ctx.lineWidth = Math.max(6, r * 0.08);
+    ctx.beginPath(); ctx.arc(cx, cy, r * 1.0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 1.0 + Math.max(3, r * 0.04), 0, Math.PI * 2); ctx.stroke();
+  } else if (S.style === 'scope') {
+    const col = 'rgba(125,255,154,.85)';
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.52, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    // 目盛り
+    for (let i = 0; i < 36; i++) {
+      const a = i / 36 * Math.PI * 2 + S.t * 0.2, l = i % 9 === 0 ? 12 : 5;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      ctx.lineTo(cx + Math.cos(a) * (r + l), cy + Math.sin(a) * (r + l)); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy + 10); ctx.stroke();
+    ctx.fillStyle = col; ctx.font = '12px ui-monospace,monospace';
+    ctx.fillText(S.ring ? 'DEPTH ②/③' : 'DEPTH ' + depthText(), cx + r * 0.72, cy - r * 0.78);
+  } else if (S.ring && S.layers.length > 2) {
+    // ライト＋二重：内側の境目だけうっすら
+    ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 0.52, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+}
+requestAnimationFrame(render);
+
+/* ---------- 操作 ---------- */
+const pts = new Map();
+let pinch = null;
+const TOUCH_UP = () => S.offset ? Math.max(70, S.r * 0.9) : 0;
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pts.size === 2) {
+    const [a, b] = [...pts.values()];
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: S.r };
+  } else movePointer(e);
+});
+cv.addEventListener('pointermove', e => {
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pts.size >= 2) {
+    const [a, b] = [...pts.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    S.r = Math.max(40, Math.min(400, pinch.r * d / pinch.d));
+    S.lx = (a.x + b.x) / 2; S.ly = (a.y + b.y) / 2 - TOUCH_UP();
+    syncUI(); return;
+  }
+  if (e.pointerType === 'mouse' || pts.has(e.pointerId)) movePointer(e);
+});
+function endPointer(e) {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) pinch = null;
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') S.visible = false; });
+function movePointer(e) {
+  S.visible = true;
+  S.lx = e.clientX;
+  S.ly = e.clientY - (e.pointerType === 'mouse' ? 0 : TOUCH_UP());
+}
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const dir = Math.sign(e.deltaY);
+  if (e.shiftKey || S.layers.length < 3 || S.ring) {
+    S.r = Math.max(40, Math.min(400, S.r * (dir > 0 ? 0.92 : 1.08)));
+  } else {
+    S.depth = Math.max(1, Math.min(S.layers.length - 1, S.depth + (dir > 0 ? 0.1 : -0.1)));
+    S.depth = Math.round(S.depth * 100) / 100;
+    hud('深さ ' + depthText());
+  }
+  syncUI();
+}, { passive: false });
+addEventListener('keydown', e => {
+  if (!$('#setup').classList.contains('hide')) return;
+  const n = S.layers.length;
+  if (e.key === '1' || e.key === '2' || e.key === '3') {
+    // 1→②、2→③、3→二重レンズ
+    if (e.key === '1') { S.ring = false; S.depth = 1; }
+    else if (e.key === '2' && n > 2) { S.ring = false; S.depth = 2; }
+    else if (e.key === '3' && n > 2) { S.ring = true; }
+    syncUI(); hud(S.ring ? '二重レンズ' : '深さ ' + depthText());
+  } else if (e.key === 'h' || e.key === 'H') {
+    $('#bar').classList.toggle('hide');
+  } else if (e.key === 'Escape') {
+    $('#imgBtn').click();
+  }
+});
+
+/* ---------- サンプル（家の外観／断面／設計図） ---------- */
+function makeSample() {
+  const W = 1200, H = 900;
+  const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; };
+  const L = [mk(), mk(), mk()];
+  const GY = 760; // 地面
+  const house = { x: 320, y: 400, w: 560, h: GY - 400 };
+  const roof = [[270, 400], [600, 170], [930, 400]];
+  const FLOOR2 = 580;
+
+  function sky(c) {
+    const g = c.createLinearGradient(0, 0, 0, GY);
+    g.addColorStop(0, '#7cc4f0'); g.addColorStop(1, '#d6eefb');
+    c.fillStyle = g; c.fillRect(0, 0, W, GY);
+    c.fillStyle = '#ffe9a6'; c.beginPath(); c.arc(1040, 120, 54, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.85)';
+    for (const [x, y, s] of [[180, 120, 1], [420, 80, .7], [760, 140, .8]]) {
+      c.beginPath(); c.ellipse(x, y, 70 * s, 26 * s, 0, 0, 7); c.ellipse(x + 40 * s, y - 14 * s, 46 * s, 26 * s, 0, 0, 7); c.fill();
+    }
+  }
+  function tree(c, x) {
+    c.fillStyle = '#6b4a2e'; c.fillRect(x - 12, GY - 150, 24, 150);
+    c.fillStyle = '#3f8f4a';
+    for (const [dx, dy, r] of [[0, -220, 75], [-50, -170, 60], [50, -170, 60], [0, -150, 60]]) { c.beginPath(); c.arc(x + dx, GY + dy, r, 0, 7); c.fill(); }
+  }
+  function ground(c, section) {
+    c.fillStyle = '#6fb35a'; c.fillRect(0, GY, W, 16);
+    if (!section) { c.fillStyle = '#8b6a45'; c.fillRect(0, GY + 16, W, H - GY - 16); return; }
+    const bands = ['#8b6a45', '#7a5a3a', '#9a8268', '#6e6a66'];
+    bands.forEach((col, i) => { c.fillStyle = col; c.fillRect(0, GY + 16 + i * 32, W, 34); });
+    c.fillStyle = 'rgba(0,0,0,.15)';
+    for (let i = 0; i < 140; i++) { c.beginPath(); c.arc((i * 97) % W, GY + 20 + (i * 53) % 120, 2 + i % 4, 0, 7); c.fill(); }
+    // 基礎と配管
+    c.fillStyle = '#b8b8b0'; c.fillRect(house.x - 10, GY, house.w + 20, 40);
+    c.strokeStyle = '#4a7fb5'; c.lineWidth = 10;
+    c.beginPath(); c.moveTo(760, GY - 20); c.lineTo(760, GY + 80); c.lineTo(W, GY + 80); c.stroke();
+    c.strokeStyle = '#999'; c.beginPath(); c.moveTo(450, GY - 10); c.lineTo(450, GY + 110); c.lineTo(0, GY + 110); c.stroke();
+  }
+  function roofPath(c) { c.beginPath(); c.moveTo(...roof[0]); c.lineTo(...roof[1]); c.lineTo(...roof[2]); c.closePath(); }
+
+  // ---------- ① 外観 ----------
+  let c = L[0].getContext('2d');
+  sky(c); tree(c, 140); ground(c, false);
+  c.fillStyle = '#9e5a44'; c.fillRect(760, 220, 50, 120); // 煙突
+  c.fillStyle = '#f1e4c8'; c.fillRect(house.x, house.y, house.w, house.h);
+  c.strokeStyle = 'rgba(120,100,70,.25)'; c.lineWidth = 2;
+  for (let y = house.y + 14; y < GY; y += 18) { c.beginPath(); c.moveTo(house.x, y); c.lineTo(house.x + house.w, y); c.stroke(); }
+  roofPath(c); c.fillStyle = '#b5523b'; c.fill();
+  c.save(); roofPath(c); c.clip();
+  c.strokeStyle = 'rgba(0,0,0,.18)'; c.lineWidth = 3;
+  for (let y = 190; y < 400; y += 22) { c.beginPath(); c.moveTo(200, y); c.lineTo(1000, y); c.stroke(); }
+  c.restore();
+  c.fillStyle = '#7a3526'; c.fillRect(255, 396, 690, 14);
+  function win(x, y, w, h) {
+    c.fillStyle = '#fff'; c.fillRect(x - 6, y - 6, w + 12, h + 12);
+    c.fillStyle = '#8fc8ea'; c.fillRect(x, y, w, h);
+    c.strokeStyle = '#fff'; c.lineWidth = 5; c.beginPath(); c.moveTo(x + w / 2, y); c.lineTo(x + w / 2, y + h); c.moveTo(x, y + h / 2); c.lineTo(x + w, y + h / 2); c.stroke();
+    c.fillStyle = '#5e8a3c'; c.fillRect(x - 10, y + h + 6, w + 20, 14);
+  }
+  win(390, 440, 110, 90); win(700, 440, 110, 90); win(400, 620, 130, 90);
+  c.fillStyle = '#6a4127'; c.fillRect(680, 620, 90, 140);
+  c.fillStyle = '#e8c36a'; c.beginPath(); c.arc(755, 695, 6, 0, 7); c.fill();
+  c.fillStyle = '#ccc'; c.fillRect(665, 752, 120, 10);
+  c.fillStyle = '#f1e4c8'; c.beginPath(); c.arc(600, 320, 36, 0, 7); c.fill();
+  c.fillStyle = '#8fc8ea'; c.beginPath(); c.arc(600, 320, 28, 0, 7); c.fill();
+
+  // ---------- ② 断面 ----------
+  c = L[1].getContext('2d');
+  sky(c); tree(c, 140); ground(c, true);
+  c.fillStyle = '#9e5a44'; c.fillRect(760, 220, 50, 120);
+  // 屋根裏
+  roofPath(c); c.fillStyle = '#e9d3a8'; c.fill();
+  c.strokeStyle = '#b5523b'; c.lineWidth = 16; c.lineJoin = 'round'; roofPath(c); c.stroke();
+  c.fillStyle = '#a77f52'; for (let i = 0; i < 3; i++) c.fillRect(520 + i * 70, 340 - i * 6, 50, 56 + i * 6);
+  c.fillStyle = '#7a5a3a'; c.fillRect(500, 396, 200, 4);
+  // 2階：寝室（左）、子供部屋（右）
+  c.fillStyle = '#dfe9f5'; c.fillRect(house.x, house.y + 10, 280, FLOOR2 - house.y - 10);
+  c.fillStyle = '#fbe3e3'; c.fillRect(house.x + 280, house.y + 10, 280, FLOOR2 - house.y - 10);
+  c.fillStyle = '#4a6fa5'; c.fillRect(350, 520, 170, 40); c.fillStyle = '#fff'; c.fillRect(350, 505, 50, 20); // ベッド
+  c.fillStyle = '#6b4a2e'; c.fillRect(350, 560, 8, 18); c.fillRect(512, 560, 8, 18);
+  c.fillStyle = '#c98b4a'; c.fillRect(780, 500, 70, 80); c.fillStyle = '#e8c36a'; c.fillRect(788, 510, 54, 26); // 本棚
+  c.fillStyle = '#e45d5d'; c.beginPath(); c.arc(690, 556, 20, 0, 7); c.fill(); // ボール
+  c.fillStyle = '#ffe27a'; c.beginPath(); c.moveTo(420, 410); c.lineTo(440, 440); c.lineTo(400, 440); c.fill(); // ランプ
+  // 1階：リビング（左）、キッチン（右）
+  c.fillStyle = '#f6efd9'; c.fillRect(house.x, FLOOR2 + 14, 330, GY - FLOOR2 - 14);
+  c.fillStyle = '#e4f2e1'; c.fillRect(house.x + 330, FLOOR2 + 14, 230, GY - FLOOR2 - 14);
+  c.fillStyle = '#9c5b8e'; c.fillRect(350, 700, 150, 45); c.fillRect(350, 670, 20, 75); c.fillRect(480, 670, 20, 75); // ソファ
+  c.fillStyle = '#333'; c.fillRect(540, 650, 90, 55); c.fillStyle = '#5ab0e6'; c.fillRect(546, 656, 78, 43); // テレビ
+  c.fillStyle = '#666'; c.fillRect(570, 705, 30, 55);
+  c.fillStyle = '#ddd'; c.fillRect(700, 680, 160, 80); c.fillStyle = '#999'; c.fillRect(700, 676, 160, 8); // キッチン台
+  c.fillStyle = '#c33'; c.beginPath(); c.arc(740, 670, 12, Math.PI, 0); c.fill(); // 鍋
+  c.fillStyle = '#eee'; c.fillRect(820, 610, 40, 50); // 戸棚
+  // 階段
+  c.fillStyle = '#b7865a';
+  for (let i = 0; i < 9; i++) c.fillRect(600 + i * 9, GY - (i + 1) * 20, 60, 20);
+  // ねこ
+  c.fillStyle = '#333';
+  c.beginPath(); c.ellipse(425, 690, 22, 13, 0, 0, 7); c.fill();
+  c.beginPath(); c.arc(447, 678, 10, 0, 7); c.fill();
+  c.beginPath(); c.moveTo(441, 672); c.lineTo(444, 662); c.lineTo(449, 670); c.fill();
+  c.beginPath(); c.moveTo(449, 670); c.lineTo(455, 662); c.lineTo(456, 673); c.fill();
+  // 壁と床の断面
+  c.fillStyle = '#6d5844';
+  c.fillRect(house.x - 6, house.y, 14, house.h); c.fillRect(house.x + house.w - 8, house.y, 14, house.h);
+  c.fillRect(house.x, FLOOR2, house.w, 14); c.fillRect(house.x, house.y, house.w, 12);
+  c.fillRect(house.x + 280, house.y + 10, 8, 100); c.fillRect(house.x + 330, FLOOR2 + 14, 8, 60);
+  c.fillStyle = '#8fc8ea'; c.fillRect(house.x - 6, 440, 14, 90); c.fillRect(house.x + house.w - 8, 440, 14, 90);
+  c.fillStyle = 'rgba(0,0,0,.55)'; c.font = 'bold 20px sans-serif';
+  c.fillText('寝室', 340, 440); c.fillText('子ども部屋', 620, 440); c.fillText('リビング', 340, 630); c.fillText('キッチン', 760, 600); c.fillText('屋根裏', 560, 300);
+
+  // ---------- ③ 設計図 ----------
+  c = L[2].getContext('2d');
+  c.fillStyle = '#123d78'; c.fillRect(0, 0, W, H);
+  c.strokeStyle = 'rgba(255,255,255,.08)'; c.lineWidth = 1;
+  for (let x = 0; x < W; x += 20) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
+  for (let y = 0; y < H; y += 20) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+  c.strokeStyle = 'rgba(255,255,255,.18)';
+  for (let x = 0; x < W; x += 100) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
+  for (let y = 0; y < H; y += 100) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+  c.strokeStyle = '#e9f3ff'; c.lineWidth = 3;
+  c.strokeRect(house.x, house.y, house.w, house.h);
+  roofPath(c); c.stroke();
+  c.lineWidth = 2;
+  // 柱・梁・筋交い
+  for (const x of [house.x, house.x + 140, house.x + 280, house.x + 420, house.x + house.w]) { c.beginPath(); c.moveTo(x, house.y); c.lineTo(x, GY); c.stroke(); }
+  for (const y of [house.y, FLOOR2, GY]) { c.beginPath(); c.moveTo(house.x, y); c.lineTo(house.x + house.w, y); c.stroke(); }
+  c.setLineDash([8, 6]);
+  for (let i = 0; i < 4; i++) {
+    const x = house.x + i * 140;
+    c.beginPath(); c.moveTo(x, house.y); c.lineTo(x + 140, FLOOR2); c.moveTo(x, FLOOR2); c.lineTo(x + 140, GY); c.stroke();
+  }
+  c.setLineDash([]);
+  // 屋根のトラス
+  c.beginPath(); c.moveTo(600, 170); c.lineTo(600, 400);
+  c.moveTo(435, 285); c.lineTo(600, 400); c.lineTo(765, 285);
+  c.moveTo(435, 285); c.lineTo(435, 400); c.moveTo(765, 285); c.lineTo(765, 400); c.stroke();
+  // 基礎
+  c.strokeRect(house.x - 10, GY, house.w + 20, 40);
+  c.beginPath(); c.moveTo(0, GY); c.lineTo(W, GY); c.stroke();
+  // 寸法線
+  c.fillStyle = '#e9f3ff'; c.font = '18px ui-monospace,monospace';
+  c.lineWidth = 1.5;
+  c.beginPath(); c.moveTo(house.x, 820); c.lineTo(house.x + house.w, 820);
+  c.moveTo(house.x, 810); c.lineTo(house.x, 830); c.moveTo(house.x + house.w, 810); c.lineTo(house.x + house.w, 830); c.stroke();
+  c.fillText('9,100', 570, 812);
+  c.beginPath(); c.moveTo(960, 170); c.lineTo(960, GY); c.moveTo(950, 170); c.lineTo(970, 170); c.moveTo(950, GY); c.lineTo(970, GY); c.stroke();
+  c.save(); c.translate(985, 500); c.rotate(-Math.PI / 2); c.fillText('9,800', 0, 0); c.restore();
+  // 木の位置
+  c.setLineDash([5, 5]); c.beginPath(); c.arc(140, GY - 190, 100, 0, 7); c.stroke(); c.setLineDash([]);
+  c.fillText('植栽', 118, GY - 185);
+  // 表題欄
+  c.lineWidth = 2; c.strokeRect(40, 40, 300, 90);
+  c.font = 'bold 22px sans-serif'; c.fillText('A邸 断面詳細図', 56, 76);
+  c.font = '15px ui-monospace,monospace'; c.fillText('S=1:50   No.03', 56, 108);
+  return L;
+}
+
+/* ---------- 起動：前回の画像を復元 ---------- */
+(async () => {
+  buildSlots();
+  for (let i = 0; i < 3; i++) { const b = await DB.get('f' + i); if (b) S.files[i] = b; }
+  refreshSlots();
+  resize();
+})();
+</script>
+</body>
+</html>
