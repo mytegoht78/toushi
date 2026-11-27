@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2312202c'/%3E%3Cline x1='38' y1='38' x2='56' y2='56' stroke='%238a5a36' stroke-width='9' stroke-linecap='round'/%3E%3Ccircle cx='26' cy='26' r='18' fill='%23123d78' stroke='%23d9dee4' stroke-width='5'/%3E%3Cpath d='M16 30h20M20 22h12M26 14v24' stroke='%23e9f3ff' stroke-width='2.5'/%3E%3C/svg%3E">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>透視レンズ</title>
 <style>
 :root{
@@ -47,6 +47,10 @@ h1{margin:0 0 4px;font-size:22px;letter-spacing:.05em}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
 .row .grow{flex:1}
 .go{background:#1a5a3a;border-color:#2f9a63;font-weight:700;padding:10px 22px;font-size:16px}
+.coverRow{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;
+  background:#12161b;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.coverRow b{display:block;font-size:14px}
+.coverRow small{color:var(--sub);font-size:12px}
 .samplesHead{margin-top:18px;font-size:13px;color:var(--sub)}
 .samples{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:6px}
 .samples button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 10px}
@@ -81,6 +85,15 @@ input[type=range]{width:96px;accent-color:var(--accent)}
     <p class="lead">重ねたい画像を 2〜3 枚えらんでください。①がいつも見えている表面、②③がレンズの奥に見える層です。<br>
     大きさは①に合わせて伸縮するので、同じ構図・同じサイズの差分画像がきれいに重なります。</p>
     <div class="slots" id="slots"></div>
+    <div class="coverRow">
+      <div><b>おおいを自動で作る</b><small>①の上にかぶせます。①だけでも遊べます（このとき③は使いません）</small></div>
+      <div class="grp">
+        <button data-cover="none">なし</button>
+        <button data-cover="frost">すりガラス</button>
+        <button data-cover="steam">湯気</button>
+        <button data-cover="silhouette">シルエット</button>
+      </div>
+    </div>
     <div class="row">
       <span class="grow"></span>
       <button class="go" id="goBtn" disabled>透視する</button>
@@ -95,6 +108,12 @@ input[type=range]{width:96px;accent-color:var(--accent)}
 
 <div id="bar" class="hide">
   <div class="grp"><button id="imgBtn" title="画像をえらび直す">画像</button><button id="miniBtn" title="バーを小さく">▾</button></div>
+  <div class="grp" id="coverGrp"><span>おおい</span>
+    <button data-cover="none">なし</button>
+    <button data-cover="frost">すりガラス</button>
+    <button data-cover="steam">湯気</button>
+    <button data-cover="silhouette">シルエット</button>
+  </div>
   <div class="grp opt"><span>レンズ</span>
     <button data-style="loupe" class="on">ルーペ</button>
     <button data-style="scope">X線</button>
@@ -125,16 +144,17 @@ const S = {
   layers: [],                  // 正規化済みcanvas
   w: 0, h: 0,
   style: 'loupe', shape: 'circle',
-  r: 130, depth: 1, zoom: 1, soft: 0.15, ring: false,
+  r: 130, depth: 1, zoom: 1, soft: 0.15, ring: false, cover: 'none',
+  src: [], covers: {},          // 自分の画像（正規化済み）と自動おおいのキャッシュ
   offset: matchMedia('(pointer:coarse)').matches,
   lx: -9999, ly: -9999, visible: false, t: 0,
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem('toushi-settings') || '{}')); } catch (e) {}
-S.lx = -9999; S.visible = false;
+S.lx = -9999; S.visible = false; S.src = []; S.covers = {};
 function saveSettings() {
   try {
-    const { style, shape, r, depth, zoom, soft, ring, offset } = S;
-    localStorage.setItem('toushi-settings', JSON.stringify({ style, shape, r, depth, zoom, soft, ring, offset }));
+    const { style, shape, r, depth, zoom, soft, ring, offset, cover } = S;
+    localStorage.setItem('toushi-settings', JSON.stringify({ style, shape, r, depth, zoom, soft, ring, offset, cover }));
   } catch (e) {}
 }
 
@@ -204,7 +224,8 @@ function refreshSlots() {
       el.querySelector('.hint').innerHTML = `${HINTS[i]}<br>タップ / ドロップで選択`;
     }
   });
-  $('#goBtn').disabled = !(S.files[0] && (S.files[1] || S.files[2]));
+  const cnt = S.files.filter(Boolean).length;
+  $('#goBtn').disabled = cnt < (S.cover !== 'none' ? 1 : 2);
 }
 function setFile(i, f) {
   S.files[i] = f;
@@ -230,29 +251,55 @@ async function toCanvas(src, w, h) {
 
 async function start(hint) {
   const list = S.files.filter(Boolean);
-  if (list.length < 2) return;
+  if (list.length < (S.cover !== 'none' ? 1 : 2)) return;
   $('#goBtn').disabled = true; $('#goBtn').textContent = '読み込み中…';
   try {
     const base = await toCanvas(list[0]);
     S.w = base.width; S.h = base.height;
-    S.layers = [base];
-    for (let i = 1; i < list.length; i++) S.layers.push(await toCanvas(list[i], S.w, S.h));
+    S.src = [base]; S.covers = {};
+    for (let i = 1; i < list.length; i++) S.src.push(await toCanvas(list[i], S.w, S.h));
+    await applyCover();
   } catch (e) {
+    console.error(e);
     alert('画像を読み込めませんでした'); $('#goBtn').textContent = '透視する'; refreshSlots(); return;
   }
   $('#goBtn').textContent = '透視する';
   $('#setup').classList.add('hide');
   $('#bar').classList.remove('hide');
-  const n = S.layers.length;
-  $('#depthGrp').style.display = n > 2 ? '' : 'none';
-  $('#ringGrp').style.display = n > 2 ? '' : 'none';
-  if (n < 3) { S.depth = 1; S.ring = false; }
-  S.depth = Math.min(S.depth, n - 1);
-  syncUI(); resize();
+  resize();
   // 最初は中央にレンズを出しておく
   S.lx = innerWidth / 2; S.ly = innerHeight * 0.45; S.visible = true;
   hud(typeof hint === 'string' ? hint : matchMedia('(pointer:coarse)').matches ? 'ドラッグでレンズを動かす' : 'マウスを動かしてのぞいてみよう', 3500);
 }
+// おおいの設定に合わせてレイヤーを組み直す
+let coverBusy = false;
+async function applyCover() {
+  if (S.cover !== 'none') {
+    if (!S.covers[S.cover]) {
+      coverBusy = true; syncUI();
+      try { S.covers[S.cover] = await makeCover(S.src[0], S.cover); }
+      finally { coverBusy = false; }
+    }
+    S.layers = [S.covers[S.cover], ...S.src].slice(0, 3);
+  } else {
+    S.layers = S.src.slice(0, 3);
+  }
+  const n = S.layers.length;
+  $('#depthGrp').style.display = n > 2 ? '' : 'none';
+  $('#ringGrp').style.display = n > 2 ? '' : 'none';
+  if (n < 3) { S.depth = 1; S.ring = false; }
+  S.depth = Math.min(Math.max(1, S.depth), n - 1);
+  syncUI();
+}
+document.querySelectorAll('[data-cover]').forEach(b => b.onclick = async () => {
+  if (coverBusy) return;
+  const prev = S.cover;
+  S.cover = b.dataset.cover;
+  if (!$('#setup').classList.contains('hide')) { syncUI(); refreshSlots(); return; }
+  if (S.cover === 'none' && S.src.length < 2) { S.cover = prev; hud('画像が1枚のときは、おおいが必要です'); return; }
+  try { await applyCover(); }
+  catch (e) { console.error(e); S.cover = prev; await applyCover(); hud('おおいを作れませんでした'); }
+});
 $('#goBtn').onclick = () => start();
 $('#imgBtn').onclick = () => { $('#setup').classList.remove('hide'); $('#bar').classList.add('hide'); refreshSlots(); };
 const SAMPLES = [
@@ -265,7 +312,7 @@ const SAMPLES = [
 SAMPLES.forEach(s => {
   const b = document.createElement('button');
   b.innerHTML = `<b>${s.name}</b><small>${s.sub}</small>`;
-  b.onclick = () => { s.make().forEach((c, i) => setFile(i, c)); start(s.hint); };
+  b.onclick = () => { S.cover = 'none'; s.make().forEach((c, i) => setFile(i, c)); start(s.hint); };
   $('#samples').appendChild(b);
 });
 
@@ -277,6 +324,7 @@ function syncUI() {
   $('#depth').max = Math.max(1, S.layers.length - 1); $('#depth').value = S.depth;
   $('#ringBtn').classList.toggle('on', S.ring);
   $('#offsetBtn').classList.toggle('on', S.offset);
+  document.querySelectorAll('[data-cover]').forEach(b => { b.classList.toggle('on', b.dataset.cover === S.cover); b.disabled = coverBusy || (b.dataset.cover === 'none' && S.src.length === 1 && $('#setup').classList.contains('hide')); });
   $('#depth').disabled = S.ring;
   $('#depthLabel').textContent = S.ring ? '②＋③' : depthText();
   saveSettings();
@@ -697,6 +745,149 @@ function makeSample() {
   c.font = 'bold 22px sans-serif'; c.fillText('A邸 断面詳細図', 56, 76);
   c.font = '15px ui-monospace,monospace'; c.fillText('S=1:50   No.03', 56, 108);
   return L;
+}
+
+/* ---------- 自動おおい（すりガラス・湯気・シルエット） ---------- */
+function cnv(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+// ふちが透けないよう、端の画素を引き伸ばして余白を付けてからぼかす
+function blurred(src, rad) {
+  const w = src.width, h = src.height, P = Math.ceil(rad * 2.5);
+  const p = cnv(w + P * 2, h + P * 2), x = p.getContext('2d');
+  x.drawImage(src, P, P);
+  x.drawImage(src, 0, 0, 1, h, 0, P, P, h); x.drawImage(src, w - 1, 0, 1, h, P + w, P, P, h);
+  x.drawImage(p, 0, P, w + P * 2, 1, 0, 0, w + P * 2, P); x.drawImage(p, 0, P + h - 1, w + P * 2, 1, 0, P + h, w + P * 2, P);
+  const out = cnv(w, h), o = out.getContext('2d');
+  o.filter = `blur(${rad}px)`;
+  if (o.filter && o.filter.includes('blur')) {
+    o.drawImage(p, -P, -P);
+    o.filter = 'none';
+  } else { // filter 非対応：縮小→拡大で代用
+    const k = Math.max(2, rad / 2.5);
+    const t = cnv(Math.max(2, Math.round(p.width / k)), Math.max(2, Math.round(p.height / k)));
+    t.getContext('2d').drawImage(p, 0, 0, t.width, t.height);
+    o.imageSmoothingQuality = 'high';
+    o.drawImage(t, -P, -P, p.width, p.height);
+  }
+  return out;
+}
+function grain(c, w, h, amount) {
+  const n = cnv(160, 160), nx = n.getContext('2d'), d = nx.createImageData(160, 160);
+  for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  nx.putImageData(d, 0, 0);
+  c.save(); c.globalAlpha = amount; c.globalCompositeOperation = 'overlay';
+  c.fillStyle = c.createPattern(n, 'repeat'); c.fillRect(0, 0, w, h); c.restore();
+}
+// 白いもや（ゆらぎのあるノイズを数段重ねる）
+function fogLayer(w, h, seed) {
+  const f = cnv(w, h), x = f.getContext('2d'), r = rnd(seed);
+  x.imageSmoothingQuality = 'high';
+  for (const cells of [4, 8, 16, 40]) {
+    const tw = cells, th = Math.max(2, Math.round(cells * h / w));
+    const t = cnv(tw, th), tx = t.getContext('2d'), d = tx.createImageData(tw, th);
+    for (let i = 0; i < d.data.length; i += 4) { d.data[i] = d.data[i + 1] = d.data[i + 2] = 255; d.data[i + 3] = 255 * r(); }
+    tx.putImageData(d, 0, 0);
+    x.globalAlpha = cells === 40 ? .25 : .45;
+    x.drawImage(t, 0, 0, w, h);
+  }
+  return f;
+}
+async function makeCover(src, type) {
+  const w = src.width, h = src.height, k = Math.max(w, h) / 1200;
+  const out = cnv(w, h), c = out.getContext('2d');
+  if (type === 'frost') {
+    c.drawImage(blurred(src, Math.max(w, h) / 32), 0, 0);
+    c.fillStyle = 'rgba(232,240,246,.30)'; c.fillRect(0, 0, w, h);
+    // ガラスの縦すじと反射
+    const r = rnd(7);
+    for (let i = 0; i < 60; i++) { c.fillStyle = `rgba(255,255,255,${r() * .06})`; c.fillRect(r() * w, 0, (2 + r() * 14) * k, h); }
+    const g = c.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, 'rgba(255,255,255,.18)'); g.addColorStop(.35, 'rgba(255,255,255,0)'); g.addColorStop(.65, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,.10)');
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    grain(c, w, h, .35);
+    return out;
+  }
+  if (type === 'steam') {
+    c.drawImage(blurred(src, Math.max(w, h) / 24), 0, 0);
+    c.fillStyle = 'rgba(240,244,247,.22)'; c.fillRect(0, 0, w, h);
+    const fog = fogLayer(w, h, 101), fx = fog.getContext('2d'), r = rnd(55);
+    // しずくが垂れた跡（もやが薄くなる）
+    fx.globalCompositeOperation = 'destination-out'; fx.lineCap = 'round';
+    for (let i = 0; i < 26; i++) {
+      const x0 = r() * w, y0 = r() * h * .6, len = (80 + r() * 380) * k, lw = (4 + r() * 9) * k;
+      fx.strokeStyle = `rgba(0,0,0,${.35 + r() * .3})`; fx.lineWidth = lw;
+      fx.beginPath(); fx.moveTo(x0, y0);
+      let x = x0; for (let y = y0; y < y0 + len; y += 12 * k) { x += (r() - .5) * 3 * k; fx.lineTo(x, y); }
+      fx.stroke();
+    }
+    c.drawImage(fog, 0, 0);
+    // 水滴
+    for (let i = 0; i < 140; i++) {
+      const x = r() * w, y = r() * h, rr = (2 + Math.pow(r(), 3) * 12) * k;
+      c.fillStyle = 'rgba(255,255,255,.22)'; c.beginPath(); c.arc(x, y, rr, 0, 7); c.fill();
+      c.strokeStyle = 'rgba(90,100,110,.25)'; c.lineWidth = Math.max(1, rr * .2); c.stroke();
+      c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(x - rr * .35, y - rr * .35, rr * .25, 0, 7); c.fill();
+    }
+    grain(c, w, h, .2);
+    return out;
+  }
+  if (type === 'silhouette') {
+    const mask = await personMask(src);
+    if (!mask) { hud('人物が見つからなかったので、すりガラスにしました', 3000); return makeCover(src, 'frost'); }
+    c.drawImage(src, 0, 0);
+    const sil = cnv(w, h), sx = sil.getContext('2d');
+    const g = sx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#1d2140'); g.addColorStop(1, '#120f22');
+    sx.fillStyle = g; sx.fillRect(0, 0, w, h);
+    sx.globalCompositeOperation = 'destination-in';
+    sx.imageSmoothingQuality = 'high';
+    sx.filter = `blur(${Math.max(1, 3 * k)}px)`;
+    sx.drawImage(mask, 0, 0, w, h);
+    sx.filter = 'none';
+    c.drawImage(sil, 0, 0);
+    return out;
+  }
+  return src;
+}
+// 人物の切り抜き（MediaPipe、端末内で実行）
+let segmenterP = null;
+function getSegmenter() {
+  if (!segmenterP) segmenterP = (async () => {
+    const V = await import(new URL('vendor/mp/vision_bundle.mjs', location.href).href);
+    const fs = await V.FilesetResolver.forVisionTasks(new URL('vendor/mp/wasm', location.href).href);
+    return V.ImageSegmenter.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: new URL('vendor/mp/selfie_multiclass_256x256.tflite', location.href).href, delegate: 'CPU' },
+      runningMode: 'IMAGE', outputCategoryMask: true, outputConfidenceMasks: false,
+    });
+  })().catch(e => { segmenterP = null; throw e; });
+  return segmenterP;
+}
+async function personMask(src) {
+  $('#goBtn').textContent = '人物を切り抜き中…';
+  hud('人物を切り抜き中…（初回はモデル読み込みに少し時間がかかります）', 8000);
+  const seg = await getSegmenter();
+  // 推論用に縮小
+  const k = Math.min(1, 768 / Math.max(src.width, src.height));
+  const im = cnv(Math.round(src.width * k), Math.round(src.height * k));
+  im.getContext('2d').drawImage(src, 0, 0, im.width, im.height);
+  const res = seg.segment(im);
+  const m = res.categoryMask, mw = m.width, mh = m.height, cat = m.getAsUint8Array();
+  const a = new Uint8Array(mw * mh); let cntP = 0;
+  for (let i = 0; i < a.length; i++) if (cat[i] !== 0) { a[i] = 1; cntP++; }
+  res.close();
+  if (cntP < a.length * 0.01) return null;
+  // ふちから肌がはみ出さないよう、少し太らせる（縦横の最大値フィルタ）
+  const R = Math.max(2, Math.round(Math.max(mw, mh) * 0.012));
+  const t = new Uint8Array(a.length), b = new Uint8Array(a.length);
+  for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+    let v = 0; for (let d = -R; d <= R && !v; d++) { const xx = x + d; if (xx >= 0 && xx < mw && a[y * mw + xx]) v = 1; } t[y * mw + x] = v;
+  }
+  for (let x = 0; x < mw; x++) for (let y = 0; y < mh; y++) {
+    let v = 0; for (let d = -R; d <= R && !v; d++) { const yy = y + d; if (yy >= 0 && yy < mh && t[yy * mw + x]) v = 1; } b[y * mw + x] = v;
+  }
+  const mc = cnv(mw, mh), mx = mc.getContext('2d'), d = mx.createImageData(mw, mh);
+  for (let i = 0; i < b.length; i++) { d.data[i * 4 + 3] = b[i] ? 255 : 0; }
+  mx.putImageData(d, 0, 0);
+  hud('できました', 1200);
+  return mc;
 }
 
 /* ---------- サンプル共通 ---------- */
@@ -1182,7 +1373,7 @@ function sampleHaunted() {
 
 /* ---------- 起動：前回の画像を復元 ---------- */
 (async () => {
-  buildSlots();
+  buildSlots(); syncUI();
   for (let i = 0; i < 3; i++) { const b = await DB.get('f' + i); if (b) S.files[i] = b; }
   refreshSlots();
   resize();

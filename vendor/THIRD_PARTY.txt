@@ -1,0 +1,8 @@
+同梱しているもの（いずれも無改変）
+
+MediaPipe Tasks Vision 0.10.14 (mp/vision_bundle.mjs, mp/wasm/) - Apache License 2.0, Google
+MediaPipe Selfie Multiclass Segmentation model (mp/selfie_multiclass_256x256.tflite) - Apache License 2.0, Google
+  入手元: https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite
+  SHA-256: c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0
+
+Apache License 2.0: see LICENSE-APACHE-2.0.txt
