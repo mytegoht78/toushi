@@ -47,10 +47,7 @@ h1{margin:0 0 4px;font-size:22px;letter-spacing:.05em}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
 .row .grow{flex:1}
 .go{background:#1a5a3a;border-color:#2f9a63;font-weight:700;padding:10px 22px;font-size:16px}
-.coverRow{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;
   background:#12161b;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
-.coverRow b{display:block;font-size:14px}
-.coverRow small{color:var(--sub);font-size:12px}
 .samplesHead{margin-top:18px;font-size:13px;color:var(--sub)}
 .samples{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:6px}
 .samples button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 10px}
@@ -94,16 +91,9 @@ input[type=range]{width:96px;accent-color:var(--accent)}
   <div class="card">
     <h1>透視レンズ</h1>
     <p class="lead">重ねたい画像を 2〜3 枚えらんでください。①がいつも見えている表面、②③がレンズの奥に見える層です。<br>
-    大きさは①に合わせて伸縮するので、同じ構図・同じサイズの差分画像がきれいに重なります。</p>
+    大きさは①に合わせて伸縮するので、同じ構図・同じサイズの差分画像がきれいに重なります。<br>
+    <b>①だけ</b>でも遊べます。そのときは①の上に「おおい」（服・すりガラス・湯気）を作り、レンズで元の①をのぞきます。</p>
     <div class="slots" id="slots"></div>
-    <div class="coverRow">
-      <div><b>おおい</b><small>①にすりガラスや湯気をかけます。服を着せたり、かける範囲を決めるのは透視画面の「着せかえ」から。①だけでも遊べます（このとき③は使いません）</small></div>
-      <div class="grp">
-        <button data-cover="none">なし</button>
-        <button data-cover="frost">すりガラス</button>
-        <button data-cover="steam">湯気</button>
-      </div>
-    </div>
     <div class="row">
       <span class="grow"></span>
       <button class="go" id="goBtn" disabled>透視する</button>
@@ -118,11 +108,11 @@ input[type=range]{width:96px;accent-color:var(--accent)}
 
 <div id="bar" class="hide">
   <div class="grp"><button id="imgBtn" title="画像をえらび直す">画像</button><button id="miniBtn" title="バーを小さく">▾</button></div>
-  <div class="grp"><button id="editBtn" title="服を着せる・おおいの範囲を決める">着せかえ</button></div>
   <div class="grp" id="coverGrp"><span>おおい</span>
-    <button data-cover="none">なし</button>
+    <button data-cover="cloth">服</button>
     <button data-cover="frost">すりガラス</button>
     <button data-cover="steam">湯気</button>
+    <button id="editBtn" title="服の形・おおいの範囲を編集">編集</button>
   </div>
   <div class="grp opt"><span>レンズ</span>
     <button data-style="loupe" class="on">ルーペ</button>
@@ -143,7 +133,7 @@ input[type=range]{width:96px;accent-color:var(--accent)}
 
 <div id="edit" class="hide">
   <div class="erow">
-    <div class="grp"><button data-etab="cloth">服</button><button data-etab="rect">おおいの範囲</button></div>
+    <div class="grp"><span>おおい</span><button data-cover="cloth">服</button><button data-cover="frost">すりガラス</button><button data-cover="steam">湯気</button></div>
     <span class="grow"></span>
     <button id="eFit" title="全体を表示">全体</button>
     <button id="eDone" class="go small">完了</button>
@@ -156,7 +146,6 @@ input[type=range]{width:96px;accent-color:var(--accent)}
     </div>
   </div>
   <div class="erow" data-epane="rect">
-    <div class="grp"><span>おおい</span><button data-cover="none">なし</button><button data-cover="frost">すりガラス</button><button data-cover="steam">湯気</button></div>
     <button id="eRectDel">選んだ範囲を消す</button>
   </div>
   <div class="ehint" id="eHint"></div>
@@ -175,7 +164,7 @@ const S = {
   layers: [],                  // 正規化済みcanvas
   w: 0, h: 0,
   style: 'loupe', shape: 'circle',
-  r: 130, depth: 1, zoom: 1, soft: 0.15, ring: false, cover: 'none',
+  r: 130, depth: 1, zoom: 1, soft: 0.15, ring: false, cover: 'frost',
   src: [], coverCv: null,       // 自分の画像（正規化済み）と作ったおおい
   dress: { rects: [], shapes: [] }, editing: false,
   offset: matchMedia('(pointer:coarse)').matches,
@@ -183,7 +172,7 @@ const S = {
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem('toushi-settings') || '{}')); } catch (e) {}
 S.lx = -9999; S.visible = false; S.src = []; S.coverCv = null; S.editing = false; S.dress = { rects: [], shapes: [] };
-if (!['none', 'frost', 'steam'].includes(S.cover)) S.cover = 'none';
+if (!['cloth', 'frost', 'steam'].includes(S.cover)) S.cover = 'frost';
 function saveSettings() {
   try {
     const { style, shape, r, depth, zoom, soft, ring, offset, cover } = S;
@@ -303,7 +292,7 @@ async function start(hint) {
   resize();
   // 最初は中央にレンズを出しておく
   S.lx = innerWidth / 2; S.ly = innerHeight * 0.45; S.visible = true;
-  if (S.layers.length < 2) { enterEdit('cloth'); return; }
+  if (S.layers.length < 2) { enterEdit(); return; }
   hud(typeof hint === 'string' ? hint : matchMedia('(pointer:coarse)').matches ? 'ドラッグでレンズを動かす' : 'マウスを動かしてのぞいてみよう', 3500);
 }
 // おおいの設定に合わせてレイヤーを組み直す
@@ -312,8 +301,9 @@ async function applyCover() {
   coverBusy = true; syncUI();
   try { S.coverCv = await buildCover(); }
   finally { coverBusy = false; }
-  S.layers = S.coverCv ? [S.coverCv, ...S.src].slice(0, 3) : S.src.slice(0, 3);
+  S.layers = S.coverCv ? [S.coverCv, S.src[0]] : S.src.slice(0, 3);
   const n = S.layers.length;
+  $('#coverGrp').style.display = S.src.length === 1 ? '' : 'none';
   $('#depthGrp').style.display = n > 2 ? '' : 'none';
   $('#ringGrp').style.display = n > 2 ? '' : 'none';
   if (n < 3) { S.depth = 1; S.ring = false; }
@@ -324,9 +314,8 @@ document.querySelectorAll('[data-cover]').forEach(b => b.onclick = async () => {
   if (coverBusy) return;
   const prev = S.cover;
   S.cover = b.dataset.cover;
-  if (!$('#setup').classList.contains('hide')) { syncUI(); refreshSlots(); return; }
-  if (S.editing) { syncUI(); editHint(); return; }
-  if (S.cover === 'none' && S.src.length < 2 && !hasCloth()) { S.cover = prev; hud('画像が1枚のときは、服かおおいが必要です'); return; }
+  if (S.editing) { E.sel = -1; E.rsel = -1; syncEdit(); return; }
+  if (S.cover === 'cloth' && !hasCloth()) { enterEdit(); return; }
   try { await applyCover(); }
   catch (e) { console.error(e); S.cover = prev; await applyCover(); hud('おおいを作れませんでした'); }
 });
@@ -342,7 +331,7 @@ const SAMPLES = [
 SAMPLES.forEach(s => {
   const b = document.createElement('button');
   b.innerHTML = `<b>${s.name}</b><small>${s.sub}</small>`;
-  b.onclick = () => { S.cover = 'none'; s.make().forEach((c, i) => setFile(i, c)); start(s.hint); };
+  b.onclick = () => { s.make().forEach((c, i) => setFile(i, c)); start(s.hint); };
   $('#samples').appendChild(b);
 });
 
@@ -354,7 +343,7 @@ function syncUI() {
   $('#depth').max = Math.max(1, S.layers.length - 1); $('#depth').value = S.depth;
   $('#ringBtn').classList.toggle('on', S.ring);
   $('#offsetBtn').classList.toggle('on', S.offset);
-  document.querySelectorAll('[data-cover]').forEach(b => { b.classList.toggle('on', b.dataset.cover === S.cover); b.disabled = coverBusy || (b.dataset.cover === 'none' && S.src.length === 1 && !hasCloth() && !S.editing && $('#setup').classList.contains('hide')); });
+  document.querySelectorAll('[data-cover]').forEach(b => { b.classList.toggle('on', b.dataset.cover === S.cover); b.disabled = coverBusy; });
   $('#depth').disabled = S.ring;
   $('#depthLabel').textContent = S.ring ? '②＋③' : depthText();
   saveSettings();
@@ -883,8 +872,8 @@ const toImg = (sx, sy) => [(sx - E.ox) / (S.w * E.s), (sy - E.oy) / (S.h * E.s)]
 const clamp01 = v => Math.max(0, Math.min(1, v));
 function editFit() { E.s = fit.w / S.w; E.ox = fit.x; E.oy = fit.y - Math.min(90, fit.y); }
 
-function enterEdit(tab) {
-  S.editing = true; E.tab = tab || E.tab; E.sel = -1; E.rsel = -1; E.dirty = true;
+function enterEdit() {
+  S.editing = true; E.sel = -1; E.rsel = -1; E.dirty = true;
   $('#bar').classList.add('hide'); $('#edit').classList.remove('hide');
   cv.style.cursor = 'crosshair';
   editFit(); syncEdit();
@@ -897,14 +886,13 @@ async function exitEdit() {
   $('#edit').classList.add('hide'); $('#bar').classList.remove('hide');
   cv.style.cursor = '';
   await applyCover();
-  if (S.layers.length < 2) hud('服を着せるか、おおいを選ぶと透視できます', 3000);
+  if (S.layers.length < 2) hud('服を1つ以上作ると透視できます', 3000);
   else hud('レンズでのぞいてみよう');
 }
 $('#editBtn').onclick = () => enterEdit();
 $('#eDone').onclick = () => exitEdit();
 $('#eFit').onclick = () => editFit();
 $('#edit').addEventListener('pointerdown', e => e.stopPropagation());
-document.querySelectorAll('[data-etab]').forEach(b => b.onclick = () => { E.tab = b.dataset.etab; syncEdit(); });
 
 // 色ボタン
 COLORS.forEach(c => {
@@ -931,7 +919,7 @@ $('#eDel').onclick = () => { if (E.sel < 0) return; S.dress.shapes.splice(E.sel,
 $('#eRectDel').onclick = () => { if (E.rsel < 0) return; S.dress.rects.splice(E.rsel, 1); E.rsel = -1; saveDress(); syncEdit(); };
 
 function syncEdit() {
-  document.querySelectorAll('[data-etab]').forEach(b => b.classList.toggle('on', b.dataset.etab === E.tab));
+  E.tab = S.cover === 'cloth' ? 'cloth' : 'rect';
   document.querySelectorAll('[data-epane]').forEach(p => p.style.display = p.dataset.epane === E.tab ? '' : 'none');
   const sh = S.dress.shapes[E.sel], st = sh || E.style || {};
   const col = st.color || nextColor(), pat = st.pattern || 'solid';
@@ -951,8 +939,7 @@ function editHint() {
     else if (sh) t = '色と柄を選べます。点はドラッグで動かせます。何もない所をタップすると、次の服を作り始めます。';
     else t = '画像をタップして点を置き、服のふちをぐるっと囲みます（上半身・下半身など、いくつでも作れます）。';
   } else {
-    t = S.cover === 'none' ? '「すりガラス」か「湯気」を選ぶと、囲んだ範囲にかかります。' :
-      S.dress.rects.length ? 'ドラッグで範囲を追加。範囲をタップして選ぶと、動かしたり角で大きさを変えたりできます。' : 'ドラッグで長方形を描くと、その中だけにおおいがかかります（範囲がないときは画像全体）。';
+    t = S.dress.rects.length ? 'ドラッグで範囲を追加。範囲をタップして選ぶと、動かしたり角で大きさを変えたりできます。' : 'ドラッグで長方形を描くと、その中だけにおおいがかかります（範囲がないときは画像全体）。';
   }
   t += (matchMedia('(pointer:coarse)').matches ? '　2本指で拡大・移動。' : '　ホイールで拡大、右ドラッグで移動。');
   $('#eHint').textContent = t;
@@ -1112,8 +1099,8 @@ function renderEdit() {
     paintClothes(pc, S.w, S.h, S.dress.shapes.filter(sh => sh.closed));
     E.dirty = false;
   }
-  ctx.drawImage(E.prev, E.ox, E.oy, iw, ih);
-  const dim = E.tab === 'rect' ? 1 : 0.45;
+  if (E.tab === 'cloth') ctx.drawImage(E.prev, E.ox, E.oy, iw, ih);
+  const dim = E.tab === 'rect' ? 1 : 0;
   // おおいの範囲
   S.dress.rects.forEach((r, i) => {
     const q = rectScr(r);
@@ -1134,7 +1121,7 @@ function renderEdit() {
     ctx.strokeStyle = '#5fd4ff'; ctx.lineWidth = 2; ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
   }
   // 服の線と点
-  const pa = E.tab === 'cloth' ? 1 : 0.35;
+  const pa = E.tab === 'cloth' ? 1 : 0;
   ctx.globalAlpha = pa;
   S.dress.shapes.forEach((sh, si) => {
     const sel = si === E.sel;
@@ -1215,12 +1202,14 @@ function paintClothes(c, w, h, shapes) {
 /* --- おおいの組み立て：①＋服 → 範囲にすりガラス・湯気 --- */
 async function buildCover() {
   const base = S.src[0]; if (!base) return null;
-  const shapes = S.dress.shapes.filter(sh => sh.closed && sh.pts.length >= 3);
-  if (!shapes.length && S.cover === 'none') return null;
+  if (S.src.length > 1) return null;
   const w = base.width, h = base.height, out = cnv(w, h), c = out.getContext('2d');
   c.drawImage(base, 0, 0);
-  paintClothes(c, w, h, shapes);
-  if (S.cover !== 'none') {
+  if (S.cover === 'cloth') {
+    const shapes = S.dress.shapes.filter(sh => sh.closed && sh.pts.length >= 3);
+    if (!shapes.length) return null;
+    paintClothes(c, w, h, shapes);
+  } else {
     const eff = await makeCover(out, S.cover);
     if (S.dress.rects.length) {
       const k = Math.max(w, h) / 1200, m = cnv(w, h), mx = m.getContext('2d');
